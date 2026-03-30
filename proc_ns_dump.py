@@ -27,6 +27,81 @@ NAMESPACE_TYPES = [
 ]
 
 
+class Colors:
+    """ANSI color codes for terminal output."""
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    
+    # Foreground colors
+    BLACK = "\033[30m"
+    RED = "\033[31m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    BLUE = "\033[34m"
+    MAGENTA = "\033[35m"
+    CYAN = "\033[36m"
+    WHITE = "\033[37m"
+    
+    # Bright foreground colors
+    BRIGHT_RED = "\033[91m"
+    BRIGHT_GREEN = "\033[92m"
+    BRIGHT_YELLOW = "\033[93m"
+    BRIGHT_BLUE = "\033[94m"
+    BRIGHT_MAGENTA = "\033[95m"
+    BRIGHT_CYAN = "\033[96m"
+    
+    # Namespace-specific colors
+    NS_COLORS = {
+        "cgroup": BRIGHT_MAGENTA,
+        "ipc": BRIGHT_CYAN,
+        "mnt": BRIGHT_YELLOW,
+        "net": BRIGHT_GREEN,
+        "pid": BRIGHT_RED,
+        "pid_for_children": RED,
+        "time": BRIGHT_BLUE,
+        "time_for_children": BLUE,
+        "user": MAGENTA,
+        "uts": CYAN,
+    }
+    
+    @classmethod
+    def disable(cls):
+        """Disable all colors."""
+        cls.RESET = ""
+        cls.BOLD = ""
+        cls.DIM = ""
+        cls.BLACK = ""
+        cls.RED = ""
+        cls.GREEN = ""
+        cls.YELLOW = ""
+        cls.BLUE = ""
+        cls.MAGENTA = ""
+        cls.CYAN = ""
+        cls.WHITE = ""
+        cls.BRIGHT_RED = ""
+        cls.BRIGHT_GREEN = ""
+        cls.BRIGHT_YELLOW = ""
+        cls.BRIGHT_BLUE = ""
+        cls.BRIGHT_MAGENTA = ""
+        cls.BRIGHT_CYAN = ""
+        for key in cls.NS_COLORS:
+            cls.NS_COLORS[key] = ""
+
+
+def supports_color():
+    """Check if the terminal supports color output."""
+    if not hasattr(sys.stdout, "isatty"):
+        return False
+    if not sys.stdout.isatty():
+        return False
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("TERM") == "dumb":
+        return False
+    return True
+
+
 def get_process_list():
     """Get list of all running process PIDs."""
     pids = []
@@ -122,18 +197,29 @@ def group_by_namespace(processes_data, ns_type):
     return groups
 
 
-def format_output(processes_data, output_format="table"):
+def colorize_ns(ns_type, text):
+    """Apply namespace-specific color to text."""
+    color = Colors.NS_COLORS.get(ns_type, Colors.WHITE)
+    return f"{color}{text}{Colors.RESET}"
+
+
+def format_output(processes_data, output_format="table", use_color=False):
     """Format the output based on the requested format."""
     if output_format == "json":
         import json
         return json.dumps(processes_data, indent=2)
-    
+
     if output_format == "table":
         lines = []
-        lines.append("=" * 100)
-        lines.append(f"{'PID':<8} {'NAME':<20} {'NAMESPACE':<15} {'INODE':<20} {'LINK'}")
-        lines.append("=" * 100)
         
+        header = f"{'PID':<8} {'NAME':<20} {'NAMESPACE':<15} {'INODE':<20} {'LINK'}"
+        if use_color:
+            header = f"{Colors.BOLD}{header}{Colors.RESET}"
+        
+        lines.append(f"{Colors.DIM}{'=' * 100}{Colors.RESET}")
+        lines.append(header)
+        lines.append(f"{Colors.DIM}{'=' * 100}{Colors.RESET}")
+
         for proc in processes_data:
             pid = proc["pid"]
             name = proc["name"]
@@ -142,25 +228,48 @@ def format_output(processes_data, output_format="table"):
                 link = ns_info["link"] or ""
                 if inode is not None:
                     inode_str = f"{ns_type}:{inode}"
-                    lines.append(f"{pid:<8} {name:<20} {ns_type:<15} {inode_str:<20} {link}")
-        
-        lines.append("=" * 100)
+                    if use_color:
+                        ns_colored = colorize_ns(ns_type, ns_type)
+                        inode_colored = colorize_ns(ns_type, inode_str)
+                        pid_colored = f"{Colors.CYAN}{pid}{Colors.RESET}"
+                        line = f"{pid_colored:<8} {name:<20} {ns_colored:<15} {inode_colored:<20} {Colors.DIM}{link}{Colors.RESET}"
+                    else:
+                        line = f"{pid:<8} {name:<20} {ns_type:<15} {inode_str:<20} {link}"
+                    lines.append(line)
+
+        lines.append(f"{Colors.DIM}{'=' * 100}{Colors.RESET}")
         return "\n".join(lines)
-    
+
     if output_format == "summary":
         lines = []
-        lines.append("Process Namespace Summary")
-        lines.append("-" * 50)
-        
+        title = "Process Namespace Summary"
+        if use_color:
+            title = f"{Colors.BOLD}{Colors.BRIGHT_BLUE}{title}{Colors.RESET}"
+        lines.append(title)
+        lines.append(f"{Colors.DIM}{'-' * 50}{Colors.RESET}")
+
         for ns_type in NAMESPACE_TYPES:
             groups = group_by_namespace(processes_data, ns_type)
-            lines.append(f"\n{ns_type.upper()} Namespaces:")
+            if use_color:
+                ns_colored = colorize_ns(ns_type, ns_type.upper())
+                lines.append(f"\n{ns_colored} Namespaces:")
+            else:
+                lines.append(f"\n{ns_type.upper()} Namespaces:")
+            
             for inode, pids in sorted(groups.items(), key=lambda x: len(x[1]), reverse=True):
                 if len(pids) > 1:
-                    lines.append(f"  {ns_type}:{inode} -> {len(pids)} processes: {pids[:5]}{'...' if len(pids) > 5 else ''}")
-        
+                    ns_inode = f"{ns_type}:{inode}"
+                    if use_color:
+                        ns_inode_colored = colorize_ns(ns_type, ns_inode)
+                        pids_colored = f"{Colors.YELLOW}{pids}{Colors.RESET}"
+                        suffix = f"{Colors.DIM}...{Colors.RESET}" if len(pids) > 5 else ""
+                        lines.append(f"  {ns_inode_colored} -> {len(pids)} processes: {pids_colored[:5]}{suffix}")
+                    else:
+                        suffix = "..." if len(pids) > 5 else ""
+                        lines.append(f"  {ns_inode} -> {len(pids)} processes: {pids[:5]}{suffix}")
+
         return "\n".join(lines)
-    
+
     return str(processes_data)
 
 
@@ -207,50 +316,62 @@ Examples:
   %(prog)s -f json              Output in JSON format
         """
     )
-    
+
     parser.add_argument(
         "-p", "--pid",
         type=int,
         help="Specific PID to inspect"
     )
-    
+
     parser.add_argument(
         "-n", "--namespace",
         type=str,
         help="Comma-separated list of namespace types to show"
     )
-    
+
     parser.add_argument(
         "-f", "--format",
         choices=["table", "json", "summary"],
         default="table",
         help="Output format (default: table)"
     )
-    
+
     parser.add_argument(
         "-s", "--shared",
         action="store_true",
         help="Show only processes that share namespaces"
     )
-    
+
     parser.add_argument(
         "-a", "--all",
         action="store_true",
         help="Show all namespace types even if inaccessible"
     )
-    
+
     parser.add_argument(
         "--find-shared",
         action="store_true",
         help="Find and display shared namespaces"
     )
-    
+
+    parser.add_argument(
+        "--color",
+        action="store_true",
+        help="Enable colored output"
+    )
+
+    parser.add_argument(
+        "--no-color",
+        action="store_true",
+        help="Disable colored output"
+    )
+
     args = parser.parse_args()
-    
+
     if not PROC_ROOT.exists():
         print("Error: /proc filesystem not available", file=sys.stderr)
         sys.exit(1)
-    
+
     if args.pid:
         pids = [args.pid]
         if not (PROC_ROOT / str(args.pid)).exists():
@@ -258,21 +379,21 @@ Examples:
             sys.exit(1)
     else:
         pids = get_process_list()
-    
+
     if not pids:
         print("No processes found", file=sys.stderr)
         sys.exit(1)
-    
+
     processes_data = []
     for pid in pids:
         data = dump_single_process(pid, show_all_ns=args.all)
         if data["namespaces"]:
             processes_data.append(data)
-    
+
     if args.namespace:
         ns_filter = [ns.strip() for ns in args.namespace.split(",")]
         processes_data = filter_by_namespace_type(processes_data, ns_filter)
-    
+
     if args.find_shared:
         shared = find_shared_namespaces(processes_data)
         print("Shared Namespaces:")
@@ -281,8 +402,13 @@ Examples:
             print(f"{ns_key}: {len(pids)} processes")
             print(f"  PIDs: {pids[:10]}{'...' if len(pids) > 10 else ''}")
         return
+
+    use_color = args.color or (supports_color() and not args.no_color)
     
-    output = format_output(processes_data, args.format)
+    if not use_color:
+        Colors.disable()
+
+    output = format_output(processes_data, args.format, use_color=use_color)
     print(output)
 
 
