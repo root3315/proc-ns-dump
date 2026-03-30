@@ -1,0 +1,8 @@
+# No external dependencies required
+# This utility uses only Python standard library modules:
+# - argparse
+# - os
+# - sys
+# - datetime
+# - pathlib
+# - json (imported conditionally)
